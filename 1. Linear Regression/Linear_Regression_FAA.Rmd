@@ -1,0 +1,432 @@
+---
+title: Study what factors and how they would impact the landing distance of a commercial
+  flight
+author: "Mohammed Nifaullah Sailappai"
+date: "1/18/2020"
+output:
+  pdf_document: default
+  html_document:
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Introduction
+<b>Background:</b> Flight landing. <br/>
+<b>Motivation:</b> To reduce the risk of landing overrun.<br/>
+<b>Goal:</b> To study what factors and how they would impact the landing distance of a commercial flight.<br/>
+<b>Data:</b> Landing data (landing distance and other parameters) from 950 commercial flights (not real data set but simulated from statistical models). <br/><br/>
+
+#### Variable dictionary<br/>
+
+<b>Aircraft:</b> The make of an aircraft (Boeing or Airbus).<br/>
+<b>Duration (in minutes):</b> Flight duration between taking off and landing. The duration of a normal flight should always be greater than 40min.<br/>
+<b>No_pasg:</b> The number of passengers in a flight.<br/>
+<b>Speed_ground (in miles per hour):</b> The ground speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal.<br/>
+<b>Speed_air (in miles per hour):</b> The air speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal.<br/>
+<b>Height (in meters):</b> The height of an aircraft when it is passing over the threshold of the runway. The landing aircraft is required to be at least 6 meters high at the threshold of the runway.<br/>
+<b>Pitch (in degrees):</b> Pitch angle of an aircraft when it is passing over the threshold of the runway.<br/>
+<b>Distance (in feet):</b> The landing distance of an aircraft. More specifically, it refers to the distance between the threshold of the runway and the point where the
+aircraft can be fully stopped. The length of the airport runway is typically less than
+6000 feet. <br/> <br/>
+
+#### Library
+```{r library}
+library(ggplot2)
+library(MASS)
+library(dplyr)
+```
+
+#### Reading Data
+```{r data_reading}
+faa1 <- read.csv("C:/Users/nifaullah/Downloads/FAAc1.csv")
+faa2 <- read.csv("C:/Users/nifaullah/Downloads/FAAc2.csv")
+```
+
+# 2. Structure of the Data
+
+## {.tabset}
+
+### FAA 1
+
+
+First dataset has 800 observations and 8 variables. 7, including one count data, of the variables are numerical in nature. Aircraft is a categorical variable with 2 levels of factors, Airbus and Boeing respectively.
+
+```{r structure_data_faa1}
+str(faa1)
+```
+
+### FAA 2
+
+Second dataset has 200 observations but only has 7 variables, with duration being the missing variable. Aircraft again is a categorical variable, but there seems to be 3 levels factor as opposed to 2 levels in earlier case, on a closer look it seems 3rd level is actually an empty string with missing data. 
+
+```{r structure_data_faa2}
+str(faa2)
+# Removing empty factor data if any
+faa2 <- droplevels(subset(faa2, aircraft != ""))
+```
+
+## 3. Merge
+Merging the two datasets vertically, also removing duplicate rows and removing the data belonging to missing factor
+```{r merge}
+
+# Creating the missing column duration in faa2 before merging the datasets vertically
+faa2$duration <- NA
+# Merging Verically
+faa <- rbind(faa1, faa2)
+# Selecting duplicates minus duration as durtion was not originally present in 2nd Dataset
+duplicate_rows <- faa  %>% 
+  select(-duration) %>% 
+  duplicated() %>% 
+  which()
+# Number of duplicates
+length(duplicate_rows)
+#Removing duplicates
+faa <- faa[-duplicate_rows,]
+# After removing duplicates 
+dim(faa)
+```
+##  4. Combined data
+### Structure
+850 observation  implies that 150 observation were either duplicates or belonged to the missing factor, which were removed in the previous operation, & 8 variables suggest that all the variables ,including the missing data from FAA2 have been merged safely.
+```{r structure_data_faa}
+str(faa)
+```
+### Summary Statistics
+1. Boeing has slightly  lower representation compared to Airbus. Speed ground and Pitch also seem fairly alright.
+2. Duration has 150 missing values likely coming from the second dataset.
+3. Speed Air proportionately has very high number of missing values, most likely this column will be dropped from the analysis.
+4. Height has a negative value which suggests presence of bad data in the column.
+5. Range for distance is quite huge.
+
+```{r summary_faa}
+summary(faa)
+```
+
+## 5. Data Cleansing
+Data is cleaned as per the description provided in the variable dictionary above i.e. values which are considered abnormal will be removed. As seen below there're 17 rows which had abnormal values and all of them have been excluded from the new dataframe.
+```{r clean_data}
+# Checking if any missing values are still present in the duration column.
+any(is.na(faa$duration))
+# Imputing groupwise mean for missing values 
+faa <- faa %>% 
+  group_by(aircraft) %>%
+  mutate(duration=ifelse(is.na(duration),mean(duration,na.rm=TRUE),duration))
+# Checking if any missing values are still present in the duration column.
+any(is.na(faa$duration))
+# Remove all abnormal rows as per the dictionary definition
+faa_normal <- faa %>% 
+  filter(duration >40,
+         (speed_ground >=30 | speed_ground <=140),
+         (is.na(speed_air) | speed_air >=30 | speed_air <=140),
+         height >=6, distance < 6000)
+# Number of rows removed based on abnormal values
+nrow(faa) - nrow(faa_normal)
+
+#Looking structure & summary after cleaning the data
+str(faa_normal)
+```
+
+```{r summ_data_cleansed}
+summary(faa_normal)
+```
+
+## Histogram {.tabset}
+
+### Duration
+```{r duration_hist}
+ggplot(data=faa_normal, aes(faa_normal$duration)) + 
+  geom_histogram() +
+   labs(x="Duration")
+```
+
+
+### Number of Passengers
+```{r nopasg_hist}
+ggplot(data=faa_normal, aes(faa_normal$no_pasg)) + 
+  geom_histogram() +
+   labs(x="# of Passengers")
+```
+
+### Speed Ground
+```{r speed_ground_hist}
+ggplot(data=faa_normal, aes(faa_normal$speed_ground)) + 
+  geom_histogram() +
+   labs(x="Speed Ground")
+```
+
+
+### Speed Air
+```{r speed_air_hist}
+ggplot(data=faa_normal, aes(faa_normal$speed_air)) + 
+  geom_histogram() +
+   labs(x="Speed Air")
+```
+
+### Height
+```{r height_hist}
+ggplot(data=faa_normal, aes(faa_normal$height)) + 
+  geom_histogram() +
+   labs(x="Height")
+```
+
+### Pitch
+```{r pitch_hist}
+ggplot(data=faa_normal, aes(faa_normal$pitch)) + 
+  geom_histogram() +
+   labs(x="Pitch")
+```
+
+
+### Distance
+```{r distance_hist}
+ggplot(data=faa_normal, aes(faa_normal$distance)) + 
+  geom_histogram() +
+   labs(x="Distance")
+```
+
+## Cleaned Data Summary
+1. Missing values in duration column have been dealt with. Still the range seems to be relatively wide and also the distribution is close to Normal.
+2. Speed Ground is well spread out with a thick centre suggesting it  to be Normal.
+3. Speed Air proportionately still has very high number of missing values and also has a big tail on the right suggesting some right skew
+4. Height is relatively stable now after removing all the abnormal values and tending towards normal distribution.
+4. Range for distance is still quite big and has a very big right tail.
+
+
+## 6. Identification of features impacting the target variaible - (Landing) Distance
+
+First we create a table which ranks the pairwise correlation with the target variable. From initial analysis it seems Speed Air, inspite of large number of missing values, and Speed Ground seem to have the highest correlation and most correlations are positive. 
+
+```{r feature_selection}
+# Converting Aircraft columns to Binary  type. airbus = 0 boeing = 1
+faa_normal$aircraft <- ifelse(faa_normal$aircraft == "airbus", 0, 1)
+# Creating an ordered correlation table against response variable with sign and magnitude
+table1 <- 
+  cor(faa_normal, use="complete.obs") %>% 
+  as.data.frame() %>% 
+  mutate(variable = rownames(.)) %>% 
+  select(variable, correlation = distance) %>% 
+  filter(variable != "distance") %>% 
+  mutate(sign = ifelse(correlation > 0, "positive", "negative"),
+         correlation = abs(correlation)) %>% 
+  arrange(desc(correlation))
+
+table1
+
+```
+
+## Pairwise Scatter Plots {.tabset}
+Below pairwise scatter plots confirms the pairwise correlation observed above.
+
+### Duration
+```{r duration_point}
+ggplot(faa_normal, aes(x=duration, y=distance)) +
+  geom_point() +
+  labs(x="Duration", y="distance")
+```
+
+
+### Number of Passengers
+```{r nopasg_point}
+ggplot(faa_normal, aes(x=no_pasg, y=distance)) +
+  geom_point() +
+  labs(x="# of Passengers", y="distance")
+```
+
+### Speed Ground
+```{r speed_ground_point}
+ggplot(faa_normal, aes(x=speed_ground, y=distance)) +
+  geom_point() +
+  labs(x="Speed Ground", y="distance")
+```
+
+
+### Speed Air
+```{r speed_air_point}
+ggplot(faa_normal, aes(x=speed_air, y=distance)) +
+  geom_point() +
+  labs(x="Speed Air", y="distance")
+```
+
+### Height
+```{r height_point}
+ggplot(faa_normal, aes(x=height, y=distance)) +
+  geom_point() +
+  labs(x="Height", y="distance")
+```
+
+### Pitch
+```{r pitch_point}
+ggplot(faa_normal, aes(x=height, y=distance)) +
+  geom_point() +
+  labs(x="Pitch", y="distance")
+```
+
+
+## 7. Regression using a single feature each time
+Regressing Y (landing distance) on each of the X variables. Based on below results it seems aircraft is the most significant variable followed by speed_air and height
+```{r ind_reg}
+# Regressing target variables on all other predictor variables
+model <- lm(distance ~ ., data=faa_normal)
+
+# calculating the p-value and sign of correlation of all variables in the above regression model
+# Creating an ordered p-value table for each variable regressed against response variable
+table2 <-
+  summary(model)$coefficients[-1,c(1,4)] %>% 
+    as.data.frame() %>% 
+    mutate(variable = rownames(.),
+           coef_direction = ifelse(Estimate >0, "positive", "negative")) %>% 
+    select(variable, 'Pr(>|t|)', coef_direction) %>% 
+    arrange(.[,2])
+
+table2
+```
+Below each variable is standardized and now, the standardized target varaible is regressed on all other variables. It is found that Speed Air, Aircraft, Height and Speed Ground to be significant variables based on the magnitude of coeeficients.
+
+```{r norm_var_reg}
+# Standardizinng numerical variables
+faa_scaled <- scale(faa_normal)%>% 
+  as.data.frame()
+# Normalized dataframe
+head(faa_scaled)
+
+# Regressing target variable on all normalized variables
+model <- lm(distance ~ ., data=faa_scaled)
+# calculating the coefficient and sign of coefficient in the above regression model
+table3 <-
+  summary(model)$coefficients[-1,c(1), drop=FALSE] %>% 
+  as.data.frame() %>% 
+  mutate(variable = rownames(.),
+         coef_direction = ifelse(Estimate >0, "positive", "negative"),
+         coefficient = abs(Estimate)) %>% 
+  select(variable, coefficient, coef_direction) %>% 
+  arrange(desc(coefficient))
+
+table3
+```
+
+
+## 8. Comparing Results
+Results from above 3 analysis is compared with each other to check if the significant variables are consistent in each analysis. From the below table it is seen that all 3 analysis are reasonably consistent if not entirely. Speed Air, Aircraft, Height & Speed Ground are orderly listed as the most influencing factors for the target variable (Landing) Distance. <br/>
+<table  border="1">
+  <tr>
+    <th>Pairwise Correlation (Table 1)</th>
+    <th>Regression (Table 2)</th>
+    <th>Standardized Regression (Table 3)</th>
+  </tr>
+  <tr>
+    <td><ul><li>Speed Air</li><li>Speed Ground</li></ul></td>
+    <td><ul><li>Aircraft</li><li>Speed Air</li><li>Height</li></ul></td>
+    <td><ul><li>Speed Air</li><li>Aircraft</li><li>Height</li><li>Speed Ground</li></ul></td>
+  </tr>
+</table>
+#### Table 0
+An ordered table is created as 'Table 0' to list factors affecting the target variable based on above analysis.
+
+<table  border="1">
+  <tr>
+    <th>Rank</th>
+    <th>Variable</th>
+  </tr>
+  <tr>
+    <td>1</td> <td>Speed Air</td>
+  </tr>
+  <tr>
+    <td>2</td> <td>Aircraft</td>
+  </tr>
+  <tr>
+    <td>3</td> <td>Height</td>
+  </tr>
+  <tr>
+    <td>4</td> <td>Speed Ground</td>
+  </tr>
+  <tr>
+    <td>5</td> <td>No. of Passengers</td>
+  </tr>
+  <tr>
+    <td>6</td> <td>Pitch</td>
+  </tr>
+  <tr>
+    <td>7</td> <td>Duration</td>
+  </tr>
+</table>
+## 9. Checking for Collinearity
+1. Coefficients in both the model1 & model2 for respective variables Speed Ground & Speed Air are positive.
+2. Surprisingly coefficient for Speed Ground in model 3 is negative, suggesting multi-collinearity.
+3. Very high positive correlation of 0.988 between Speed Air & Speed Ground confirms the above assumption.
+4. Speed Air is preferrred to Speed Ground as the adjusted R-Square for model2 is significantly higher than model 2.
+
+```{r coll}
+model1 <- lm(distance ~ speed_ground, data=faa_normal)
+summary(model1)
+model2 <- lm(distance ~ speed_air, data=faa_normal)
+summary(model2)
+model3 <- lm(distance ~ speed_ground + speed_air, data=faa_normal)
+summary(model3)
+
+# Correlation between speed_air & speed_ground
+cor(faa_normal$speed_ground, faa_normal$speed_air, use = "complete.obs")
+```
+
+## 10. Variable Selection Based on Ranking in Table 0.
+Six different models are built based on  ranking listed in table 0 leaving out speed_ground (for multi-collineraity reasons) and compare R-square, Adjusted R-square and AIC for these varaiables.
+
+From the below analysis it is found that
+1. R-Square increases with increase in the number of varaiables. It increases very slowly after model 3.
+2. Adjusted increases  with  increase in the number of varaiables up until model 4 afterwards there is a slow decrease. Similar to R-Square Criteria it remains almost constant after model 3.
+3. AIC decreases with increase in the number of varaiables up until model 4 afterwards there is a slow increase in AIC. Similarly to above criterias AIC is almost constant after model 3.
+
+
+```{r var_sel_man}
+# running 6 separate regression models by adding variables in each model based on Table 0
+model1 <- lm(distance ~ speed_air, data=faa_normal)
+model2 <- lm(distance ~ speed_air+aircraft, data=faa_normal)
+model3 <- lm(distance ~ speed_air+aircraft+height, data=faa_normal)
+model4 <- lm(distance ~ speed_air+aircraft+height+no_pasg, data=faa_normal)
+model5 <- lm(distance ~ speed_air+aircraft+height+no_pasg+pitch, data=faa_normal)
+model6 <- lm(distance ~ speed_air+aircraft+height+no_pasg+pitch+duration, data=faa_normal)
+
+# Tabulating R-Square, Adjusted R-Square & AIC for each model
+manual_model_analysis <-
+rbind(c(summary(model1)$r.squared,summary(model1)$adj.r.squared,AIC(model1),1),
+      c(summary(model2)$r.squared,summary(model2)$adj.r.squared,AIC(model2),2),
+      c(summary(model3)$r.squared,summary(model3)$adj.r.squared,AIC(model3),3),
+      c(summary(model4)$r.squared,summary(model4)$adj.r.squared,AIC(model4),4),
+      c(summary(model5)$r.squared,summary(model5)$adj.r.squared,AIC(model5),5),
+      c(summary(model6)$r.squared,summary(model6)$adj.r.squared,AIC(model6),6)) %>% 
+  as.data.frame() %>% 
+  select(r_square = V1,adj_r_square = V2, AIC = V3, model = V4)
+manual_model_analysis
+
+# R-Square vs. No.of Variables included in the model
+ggplot(data=manual_model_analysis, aes(x=model, y=r_square)) +
+  geom_line() +
+  scale_x_continuous(breaks=1:6) +
+  labs(x="# of Variables", y="R-Square")
+
+# Adjusted R-Square vs. No.of Variables included in the model
+ggplot(data=manual_model_analysis, aes(x=model, y=adj_r_square)) +
+  geom_line() +
+  scale_x_continuous(breaks=1:6) +
+  labs(x="# of Variables", y="Adjusted R-Square")
+
+# AIC vs. No.of Variables included in the model
+ggplot(data=manual_model_analysis, aes(x=model, y=AIC)) +
+  geom_line() +
+  scale_x_continuous(breaks=1:6) +
+  labs(x="# of Variables", y="AIC")
+```
+
+### Final List of Variables
+Based on the above analysis & since all 3 criterias almost remain constant after model 3, following 3 variables are selected for the final model.
+1. Speed Air
+2. Aircraft
+3. Height
+
+## 11. Comparing Manual Analysis with Automated Function
+In-built "StepAIC" function is used to select the list of # of variables to be included in the model and the results are consistent with the above conclusions.
+```{r step_aic}
+stepAIC(model6,k=6)
+```
