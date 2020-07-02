@@ -1,0 +1,127 @@
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Introduction
+<b>Background:</b> Flight landing. <br/>
+<b>Motivation:</b> To reduce the risk of landing overrun.<br/>
+<b>Goal:</b> To study what factors and how they would impact the landing distance of a commercial flight.<br/>
+<b>Approach:</b> Use Logistic Regression to classify risky and safe landings<br/>
+<b>Data:</b> Landing data (landing distance and other parameters) from 950 commercial flights (not real data set but simulated from statistical models). <br/><br/>
+
+#### Variable dictionary<br/>
+
+<b>Aircraft:</b> The make of an aircraft (Boeing or Airbus).<br/>
+<b>Duration (in minutes):</b> Flight duration between taking off and landing. The duration of a normal flight should always be greater than 40min.<br/>
+<b>No_pasg:</b> The number of passengers in a flight.<br/>
+<b>Speed_ground (in miles per hour):</b> The ground speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal.<br/>
+<b>Speed_air (in miles per hour):</b> The air speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal.<br/>
+<b>Height (in meters):</b> The height of an aircraft when it is passing over the threshold of the runway. The landing aircraft is required to be at least 6 meters high at the threshold of the runway.<br/>
+<b>Pitch (in degrees):</b> Pitch angle of an aircraft when it is passing over the threshold of the runway.<br/>
+<b>Distance (in feet):</b> The landing distance of an aircraft. More specifically, it refers to the distance between the threshold of the runway and the point where the
+aircraft can be fully stopped. The length of the airport runway is typically less than
+6000 feet. <br/> <br/>
+
+## 2. Setup
+All duplicates are removed and a clean dataset is setup  to work with.
+```{r library}
+library(ggplot2)
+library(MASS)
+library(dplyr)
+library(faraway)
+library("nnet")
+faa1 <- read.csv("C:/Users/nifaullah/Downloads/FAAc1.csv")
+faa2 <- read.csv("C:/Users/nifaullah/Downloads/FAAc2.csv")
+# Removing empty factor data if any
+faa2 <- droplevels(subset(faa2, aircraft != ""))
+# Creating the missing column duration in faa2 before merging the datasets vertically
+faa2$duration <- NA
+# Merging Verically
+faa <- rbind(faa1, faa2)
+# Selecting duplicates minus duration as durtion was not originally present in 2nd Dataset
+duplicate_rows <- faa  %>% 
+  select(-duration) %>% 
+  duplicated() %>% 
+  which()
+#Removing duplicates
+faa <- faa[-duplicate_rows,]
+# After removing duplicates 
+dim(faa)
+# Remove all abnormal rows as per the dictionary definition
+faa_normal <- faa %>% 
+  filter(duration >40,
+         (speed_ground >=30 | speed_ground <=140),
+         (is.na(speed_air) | speed_air >=30 | speed_air <=140),
+         height >=6, distance < 6000)
+# Creating Categorical variables for classification
+faa_normal$Y <- ifelse(faa_normal$distance < 1000, 1, ifelse(faa_normal$distance < 2500, 2, 3))
+faa_normal$Y <- as.factor(faa_normal$Y)
+#Removing Distance Column and Speed_air column as it has high correlation with Speed_ground
+faa_normal <- subset(faa_normal, select = -c(distance, speed_air))
+#Histogram for Risky Landing
+ggplot(faa_normal, aes(x=Y)) + 
+   labs(x="Y") +
+    geom_bar()
+```
+
+
+## 3. Model Selection
+First we regess the full model and then we use step function to select the best model based on AIC.
+```{r ind_reg}
+full_model <- multinom(Y ~ aircraft + speed_ground + height + pitch + no_pasg+ duration, faa_normal )
+
+step_model <- step(full_model)
+summary(step_model)
+
+### Difference between deviances
+deviance(step_model)-deviance(full_model)
+### Difference between degrees of freedom
+full_model$edf-step_model$edf
+### Chi^2 test
+pchisq(deviance(step_model)-deviance(full_model),full_model$edf-step_model$edf,lower=F)
+```
+
+
+## 4. Plots & Inferences
+
+Comparatively Boieng dominates category 2 and 3 but Airbus dominates Category 1.
+```{r}
+ggplot(faa_normal, aes(x=aircraft, fill=Y)) + 
+  geom_bar(position = 'dodge')
+```
+
+There seems to be a positive correlation between Speed_Ground & the categorical variable Y.
+
+```{r}
+ggplot(faa_normal, aes(x=Y, y=speed_ground)) +
+  geom_boxplot()
+```
+
+
+
+The range of height for Category 1 is lesser than  Category 3 which is slightly lesser than category 2.
+
+```{r}
+ggplot(faa_normal, aes(x=Y, y=height)) +
+  geom_boxplot()
+```
+
+The range of height for Category 1 is lesser than  Category 2 which is slightly lesser than category 3.
+
+```{r}
+ggplot(faa_normal, aes(x=Y, y=pitch)) +
+  geom_boxplot()
+```
+
+
+## 5. Conclusion
+1) Final variables selected are as follows: <br/>
+    aircraft <br/>
+    speed_ground <br/>
+    height <br/>
+    pitch
+2) The odds for the Category = 1 is very high when the aircrfat is Airbus. Aircraft by itself is a major influencer in the model.
+3) The odds for Category = 1 is high when Speed_ground is low, the odds for category = 2 is high when speed ground is medium and the odds for category = 3 is high when speed ground is high.
+4) In regards to height Category = 1 has highest odds when height is lowest, followed by Category = 3 and Category = 2 as height increases
+5) When pitch is lowest Category = 1 has the highest odds and as pitch increases the odds category = 2 & category =3 start to improve. 
