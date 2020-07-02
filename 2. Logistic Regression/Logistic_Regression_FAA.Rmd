@@ -1,0 +1,400 @@
+---
+title: Study what factors and how they would impact the landing distance of a commercial
+  flight
+author: "Mohammed Nifaullah Sailappai"
+date: "1/31/2020"
+output:
+  html_document:
+    code_folding: show
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Introduction
+<b>Background:</b> Flight landing. <br/>
+<b>Motivation:</b> To reduce the risk of landing overrun.<br/>
+<b>Goal:</b> To study what factors and how they would impact the landing distance of a commercial flight.<br/>
+<b>Approach:</b> Use Logistic Regression to classify risky and safe landings<br/>
+<b>Data:</b> Landing data (landing distance and other parameters) from 950 commercial flights (not real data set but simulated from statistical models). <br/><br/>
+
+#### Variable dictionary<br/>
+
+<b>Aircraft:</b> The make of an aircraft (Boeing or Airbus).<br/>
+<b>Duration (in minutes):</b> Flight duration between taking off and landing. The duration of a normal flight should always be greater than 40min.<br/>
+<b>No_pasg:</b> The number of passengers in a flight.<br/>
+<b>Speed_ground (in miles per hour):</b> The ground speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal.<br/>
+<b>Speed_air (in miles per hour):</b> The air speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal.<br/>
+<b>Height (in meters):</b> The height of an aircraft when it is passing over the threshold of the runway. The landing aircraft is required to be at least 6 meters high at the threshold of the runway.<br/>
+<b>Pitch (in degrees):</b> Pitch angle of an aircraft when it is passing over the threshold of the runway.<br/>
+<b>Distance (in feet):</b> The landing distance of an aircraft. More specifically, it refers to the distance between the threshold of the runway and the point where the
+aircraft can be fully stopped. The length of the airport runway is typically less than
+6000 feet. <br/> <br/>
+
+## 2. Setup
+All duplicates are removed and a clean dataset is setup  to work with.
+```{r library}
+library(ggplot2)
+library(MASS)
+library(dplyr)
+library(faraway)
+faa1 <- read.csv("C:/Users/nifaullah/Downloads/FAAc1.csv")
+faa2 <- read.csv("C:/Users/nifaullah/Downloads/FAAc2.csv")
+# Removing empty factor data if any
+faa2 <- droplevels(subset(faa2, aircraft != ""))
+# Creating the missing column duration in faa2 before merging the datasets vertically
+faa2$duration <- NA
+# Merging Verically
+faa <- rbind(faa1, faa2)
+# Selecting duplicates minus duration as durtion was not originally present in 2nd Dataset
+duplicate_rows <- faa  %>% 
+  select(-duration) %>% 
+  duplicated() %>% 
+  which()
+#Removing duplicates
+faa <- faa[-duplicate_rows,]
+# After removing duplicates 
+dim(faa)
+# Remove all abnormal rows as per the dictionary definition
+faa_normal <- faa %>% 
+  filter(duration >40,
+         (speed_ground >=30 | speed_ground <=140),
+         (is.na(speed_air) | speed_air >=30 | speed_air <=140),
+         height >=6, distance < 6000)
+# Creatinng Binary variables for classification
+faa_normal$long.landing <- ifelse(faa_normal$distance > 2500, 1, 0)
+faa_normal$long.landing <- as.factor(faa_normal$long.landing)
+faa_normal$risky.landing <- ifelse(faa_normal$distance > 3000, 1, 0)
+faa_normal$risky.landing <- as.factor(faa_normal$risky.landing)
+faa_normal$aircraft <- as.factor(faa_normal$aircraft)
+#Removing Distance Column
+faa_normal <- subset(faa_normal, select = -c(distance))
+#Histogram for Risky Landing
+ggplot(faa_normal, aes(x=long.landing)) + 
+   labs(x="Long Landing") +
+    geom_bar()
+```
+
+<h2>3.Regression using a single feature each time</h2>
+Regressing Y (Long Landing) on each of the X variables. Only 3 variables Aircraft, Speed Ground and Speed Air are significant rest all are insignificant if regressed independently.
+
+```{r ind_reg}
+table1 <- data.frame()
+for(i in 1:7)
+{
+  model <- glm(long.landing~faa_normal[,i], faa_normal, family=binomial)
+  table1 <- rbind(table1, data.frame(variable = names(faa_normal[,i,drop=FALSE]),
+                   coeff_size = abs(model$coefficients[2]),
+                   coeff_direction = ifelse(model$coefficients[2] >= 0, "Positive", "Negative"),
+                   odds_ratio = exp(model$coefficients[2]),
+                   p_value = round(summary(model)$coefficients[-1,c(1,4)][2],2),
+                   row.names = NULL)
+  )
+}
+table1 %>% 
+  arrange(p_value)
+
+
+```
+
+
+## 4. Checking Association with Significant variables {.tabset}
+1. Boeing has slightly higher long landings compared to Airbus.
+2. As explained the positive correlation above long landing with increase in speed grund & speed air
+
+### Aircraft
+```{r}
+ggplot(faa_normal, aes(x=aircraft, fill=long.landing)) +
+    geom_bar(position = 'dodge')
+```
+
+
+### Speed Air
+```{r}
+ggplot(faa_normal, aes(x=speed_air, fill=long.landing)) +
+    geom_histogram(position = 'dodge', aes(y=..density..))
+```
+
+### Speed Ground
+```{r}
+ggplot(faa_normal, aes(x=speed_ground, fill=long.landing)) +
+    geom_histogram(position = 'dodge', aes(y=..density..))
+```
+
+## 5. Checking for Collinearity
+1. Speed air, height and aircraft are the significant variables.
+2. Additionally Speed Ground has a negative sign whereas we earlier observed that speed ground increases with increase in long landing suggesting some effects of multi-collinearity.
+We will remove Speed Air from the dataset & only pick Speed Ground instead, as Speed Air has close 600 values missing.
+3. The model is incosistent with earlier results
+
+```{r coll}
+full_model <- glm(long.landing ~ ., data=faa_normal, family=binomial)
+summary(full_model)
+faa_normal <- subset(faa_normal, select = -c(speed_air))
+full_model <- glm(long.landing ~ ., data=faa_normal, family=binomial)
+```
+
+## 6. Stepwise Forward AIC
+The results of stepwise AIC are not consistent with the results of the single variable regression. Here the significant variables are aircraft, speed_ground, height & pitch.
+```{r}
+full_model_forward_aic <- step(full_model)
+```
+
+
+## 7. Stepwise Forward BIC
+The results of stepwise BIC are consistent with the results of The results of stepwise AIC. Here again the significant variables are aircraft, speed_ground, height & pitch.
+```{r}
+full_model_forward_bic <- step(full_model, k = log(length(faa_normal)))
+```
+
+## 8. Final Model for Long Landings
+We remove pitch from the final model as it had a high p-value & regress the target variable upon aircraft, speed_air and height. 
+
+1. Aircraft has the most effect on long landings.
+2. Speed Air & Height do not have as much effect as Aircraft.
+3. The Odds of long landing is signifincatly very high when it's a boeing aircraft.
+```{r}
+final_model_long_landings <- glm(long.landing ~ aircraft + speed_ground + height, data=faa_normal, family=binomial)
+summary(final_model_long_landings)
+```
+
+## 9.1 Regression using a single feature each time
+
+Regressing Y (Long Landing) on each of the X variables. Only 2 variables Aircraft, and Speed Ground are significant and are poitively correlated and rest all are insignificant if regressed independently.
+
+```{r}
+#Histogram for Risky Landing
+ggplot(faa_normal, aes(x=risky.landing)) + 
+   labs(x="Risky Landing") +
+    geom_bar()
+table1 <- data.frame()
+for(i in 1:7)
+{
+  model <- glm(risky.landing~faa_normal[,i], faa_normal, family=binomial)
+  table1 <- rbind(table1, data.frame(variable = names(faa_normal[,i,drop=FALSE]),
+                   coeff_size = abs(model$coefficients[2]),
+                   coeff_direction = ifelse(model$coefficients[2] >= 0, "Positive", "Negative"),
+                   odds_ratio = exp(model$coefficients[2]),
+                   p_value = round(summary(model)$coefficients[-1,c(1,4)][2],2),
+                   row.names = NULL)
+  )
+}
+table1 %>% 
+  arrange(p_value)
+```
+
+
+## 9.2. Checking Association with Significant variables {.tabset}
+1. Again Boeing has slightly higher risky landings compared to Airbus.
+2. As earlier risky landing increases with increase in speed groud.
+
+### Aircraft
+```{r}
+ggplot(faa_normal, aes(x=aircraft, fill=risky.landing)) +
+    geom_bar(position = 'dodge')
+```
+
+
+### Speed Ground
+```{r}
+ggplot(faa_normal, aes(x=speed_ground, fill=risky.landing)) +
+    geom_histogram(position = 'dodge', aes(y=..density..))
+```
+## 11. Checking for Collinearity
+1. Speed Ground and aircraft are the significant variables.
+2. Additionally any possible collinearity was removed with the removal of speed_air 
+
+```{r}
+full_model <- glm(risky.landing ~ ., data=faa_normal, family=binomial)
+summary(full_model)
+```
+
+## 9.3 Stepwise Forward AIC
+The results of stepwise AIC are some what consistent with the results of the single variable regression. Here the selected variables are no_pasg, aircraft and speed_air, 
+```{r}
+full_model_forward_aic <- step(full_model)
+```
+
+
+## 9.4 Stepwise Forward BIC
+The results of stepwise BIC are consistent with the results of The results of stepwise AIC. Here again the significant variables are aircraft and speed_air.
+```{r}
+full_model_forward_bic <- step(full_model, k = log(length(faa_normal)))
+```
+
+## 10. Final Model for Risky Landings
+We remove pitch from the final model as it had a high p-value & regress the target variable upon aircraft, speed_air and height. 
+1. Aircraft has the most effect on long landings.
+2. Speed Ground do not have as much effect as Aircraft.
+3. The Odds of risky landing is signifincatly very high when it's a boeing aircraft.
+4. We remove no_pasg from the model as it is insignificant.
+```{r}
+final_model_risky_landings <- glm(risky.landing ~ aircraft + speed_ground, data=faa_normal, family=binomial)
+summary(final_model_risky_landings)
+```
+
+## 11. Comparison
+1. Risky Landings mainly depends on Aircraft & Speed Ground
+2. Long Landings mainly depends on Aircraft, Speed Ground & Height
+3. In both the cases the odds massively increase if the aircraft is boeing.
+
+
+## 12. ROC Curve  {.tabset}
+As we can see ROC plot for Risky Landing model appears to cover more area compared to Long Landing model it is likely that Risky Landing model has more Area Under Curve.
+
+### Long Landings
+```{r}
+faa_normal_l<-na.omit(faa_normal) ### Remove the rows with missing values
+dim(faa_normal_l)
+model.final.l<-glm(long.landing ~ aircraft + speed_ground + height, data=faa_normal_l, family=binomial)
+linpred.l<-predict(model.final.l) ### Linear predictor
+predprob.l<-predict(model.final.l,type="response") ### predicted
+predout.l<-ifelse(predprob.l<0.5,"no","yes") ### Predicted outcomes using
+faa_normal_l<-data.frame(faa_normal_l,predprob.l,predout.l)
+
+xtabs(~long.landing+predout.l,faa_normal_l)
+
+thresh.l<-seq(0.01,0.5,0.01)
+sensitivity.l<-specificity.l<-rep(NA,length(thresh.l))
+for(j in seq(along=thresh.l)){
+pp.l<-ifelse(faa_normal_l$predprob.l<thresh.l[j],"no","yes")
+xx.l<-xtabs(~long.landing+pp.l,faa_normal_l)
+specificity.l[j]<-xx.l[1,1]/(xx.l[1,1]+xx.l[1,2])
+sensitivity.l[j]<-xx.l[2,2]/(xx.l[2,1]+xx.l[2,2])
+}
+par(mfrow=c(1,2))
+matplot(thresh.l,cbind(sensitivity.l,specificity.l),type="l",xlab="Thr
+eshold",ylab="Proportion",lty=1:2)
+plot(1-specificity.l,sensitivity.l,type="l");abline(0,1,lty=2)
+```
+
+### Risky Landings
+```{r}
+faa_normal_r<-na.omit(faa_normal) ### Remove the rows with missing values
+dim(faa_normal_r)
+model.final.r<-glm(risky.landing ~ aircraft + speed_ground, data=faa_normal_r, family=binomial)
+predprob.r<-predict(model.final.r,type="response") ### predicted
+predout.r<-ifelse(predprob.r<0.5,"no","yes") ### Predicted outcomes using
+faa_normal_r<-data.frame(faa_normal_r,predprob.r,predout.r)
+xtabs(~risky.landing+predout.r,faa_normal_r)
+
+thresh.r<-seq(0.01,0.5,0.01)
+sensitivity.r<-specificity.r<-rep(NA,length(thresh.r))
+for(j in seq(along=thresh.r)){
+pp.r<-ifelse(faa_normal_r$predprob.r<thresh.r[j],"no","yes")
+xx.r<-xtabs(~risky.landing+pp.r,faa_normal_r)
+specificity.r[j]<-xx.r[1,1]/(xx.r[1,1]+xx.r[1,2])
+sensitivity.r[j]<-xx.r[2,2]/(xx.r[2,1]+xx.r[2,2])
+}
+par(mfrow=c(1,2))
+matplot(thresh.r,cbind(sensitivity.r,specificity.r),type="l",xlab="Thr
+eshold",ylab="Proportion",lty=1:2)
+plot(1-specificity.r,sensitivity.r,type="l");abline(0,1,lty=2)
+```
+
+## 13. Predicting Probability {.tabset}
+Risky Landing model has a wider range compared to Long Landing Model.
+
+### Long Landing
+```{r}
+new.ind<-data.frame(aircraft="boeing", duration=200, no_pasg=80, speed_ground=115, speed_air=120, height=40, pitch=4)
+### Predict the value with its standard error
+pred.l <- predict(model.final.l,newdata=new.ind,type="response",se=T)
+
+upper.l <- ilogit(pred.l$fit + (1.96 * pred.l$se.fit))
+lower.l <- ilogit(pred.l$fit - (1.96 * pred.l$se.fit))
+fit.l <- ilogit(pred.l$fit)
+
+cat("95% Confidence Interval", "lower:", lower.l, "| fit:" , fit.l, "| upper:", upper.l)
+```
+
+### Risky Landing
+```{r}
+new.ind<-data.frame(aircraft="boeing", duration=200, no_pasg=80, speed_ground=115, speed_air=120, height=40, pitch=4)
+### Predict the value with its standard error
+pred.r <- predict(model.final.r,newdata=new.ind,type="response",se=T)
+
+upper.r <- ilogit(pred.r$fit + (1.96 * pred.r$se.fit))
+lower.r <- ilogit(pred.r$fit - (1.96 * pred.r$se.fit))
+fit.r <- ilogit(pred.r$fit)
+
+cat("95% Confidence Interval", "lower:", lower.r, "| fit:" , fit.r, "| upper:", upper.r)
+```
+
+## 14. Comparing different Link Functions
+Logit has slightly higher coefficient for both aircraft and speed_ground compared to probit and hazard both of which are similar in its estimate.
+```{r}
+model.probit.r <- glm(risky.landing ~ aircraft+speed_ground, family=binomial (link = "probit"), data=faa_normal_r)
+model.hazard.r <- glm(risky.landing ~ aircraft+speed_ground, family=binomial (link = "cloglog"), data=faa_normal_r)
+
+summary(model.final.r)$coefficients
+summary(model.probit.r)$coefficients
+summary(model.hazard.r)$coefficients
+```
+
+
+## 15. ROC Curves for different link Functions
+Although all three appear quite similar & is difficult to gauge from the below plot but it seems probit covers slightly more area compared to logit & hazard.
+```{r}
+predprob.r.probit<-predict(model.probit.r,type="response") ### predicted
+predout.r.probit<-ifelse(predprob.r.probit<0.5,"no","yes") ### Predicted outcomes using
+faa_normal_r<-data.frame(faa_normal_r,predprob.r.probit,predout.r.probit)
+xtabs(~risky.landing+predout.r.probit,faa_normal_r)
+
+thresh.r.probit<-seq(0.01,0.5,0.01)
+sensitivity.r.probit<-specificity.r.probit<-rep(NA,length(thresh.r.probit))
+for(j in seq(along=thresh.r.probit)){
+pp.r<-ifelse(faa_normal_r$predprob.r.probit<thresh.r.probit[j],"no","yes")
+xx.r<-xtabs(~risky.landing+pp.r,faa_normal_r)
+specificity.r.probit[j]<-xx.r[1,1]/(xx.r[1,1]+xx.r[1,2])
+sensitivity.r.probit[j]<-xx.r[2,2]/(xx.r[2,1]+xx.r[2,2])
+}
+
+
+predprob.r.hazard<-predict(model.hazard.r,type="response") ### predicted
+predout.r.hazard<-ifelse(predprob.r.hazard<0.5,"no","yes") ### Predicted outcomes using
+faa_normal_r<-data.frame(faa_normal_r,predprob.r.hazard,predout.r.hazard)
+xtabs(~risky.landing+predout.r.hazard,faa_normal_r)
+
+thresh.r.hazard<-seq(0.01,0.5,0.01)
+sensitivity.r.hazard<-specificity.r.hazard<-rep(NA,length(thresh.r.hazard))
+for(j in seq(along=thresh.r.hazard)){
+pp.r<-ifelse(faa_normal_r$predprob.r.hazard<thresh.r.hazard[j],"no","yes")
+xx.r<-xtabs(~risky.landing+pp.r,faa_normal_r)
+specificity.r.hazard[j]<-xx.r[1,1]/(xx.r[1,1]+xx.r[1,2])
+sensitivity.r.hazard[j]<-xx.r[2,2]/(xx.r[2,1]+xx.r[2,2])
+}
+par(mfrow=c(1,3))
+plot(1-specificity.r,sensitivity.r,type="l");abline(0,1,lty=2)
+plot(1-specificity.r.probit,sensitivity.r.probit,type="l");abline(0,1,lty=2)
+plot(1-specificity.r.hazard,sensitivity.r.hazard,type="l");abline(0,1,lty=2)
+```
+
+
+## 16. Predict Top 5 Risky Landings
+64th value appears for all 3 link function and 56 appears for probit and hazard, rest all values are different 
+```{r}
+head(sort(predprob.r, decreasing = TRUE),5)
+head(sort(predprob.r.probit, decreasing = TRUE),5)
+head(sort(predprob.r.hazard, decreasing = TRUE),5)
+```
+
+## 17. Confidence Interval for Probit & Hazard
+From the below analysis it seems like the model with the hazard link function is more accurate fit compared to probit.
+
+```{r}
+pred.probit <- predict(model.probit.r,newdata=new.ind,type="response",se=T)
+upper.probit <- ilogit(pred.probit$fit + (1.96 * pred.probit$se.fit))
+lower.probit <- ilogit(pred.probit$fit - (1.96 * pred.probit$se.fit))
+fit.probit <- ilogit(pred.probit$fit)
+
+pred.hazard <- predict(model.hazard.r,newdata=new.ind,type="response",se=T)
+upper.hazard <- ilogit(pred.hazard$fit + (1.96 * pred.hazard$se.fit))
+lower.hazard <- ilogit(pred.hazard$fit - (1.96 * pred.hazard$se.fit))
+fit.hazard <- ilogit(pred.hazard$fit)
+
+cat("95% Confidence Interval for probit", "lower:", lower.probit, "| fit:" , fit.probit, "| upper:", upper.probit)
+cat("95% Confidence Interval for hazard", "lower:", lower.hazard, "| fit:" , fit.hazard, "| upper:", upper.hazard)
+```
